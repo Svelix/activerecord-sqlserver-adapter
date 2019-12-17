@@ -34,7 +34,6 @@ module ActiveRecord
               SQLServer::Quoting,
               SQLServer::DatabaseStatements,
               SQLServer::Showplan,
-              SQLServer::SchemaDumper,
               SQLServer::SchemaStatements,
               SQLServer::DatabaseLimits,
               SQLServer::DatabaseTasks
@@ -136,6 +135,10 @@ module ActiveRecord
         false
       end
 
+      def supports_savepoints?
+        true
+      end
+
       def supports_in_memory_oltp?
         @version_year >= 2014
       end
@@ -188,7 +191,7 @@ module ActiveRecord
 
       def tables_with_referential_integrity
         schemas_and_tables = select_rows <<-SQL.strip_heredoc
-          SELECT s.name, o.name
+          SELECT DISTINCT s.name, o.name
           FROM sys.foreign_keys i
           INNER JOIN sys.objects o ON i.parent_object_id = o.OBJECT_ID
           INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
@@ -211,7 +214,7 @@ module ActiveRecord
       end
 
       def sqlserver_azure?
-        @sqlserver_azure ||= !!(select_value('SELECT @@version', 'SCHEMA') =~ /Azure/i)
+        !!(sqlserver_version =~ /Azure/i)
       end
 
       def database_prefix_remote_server?
@@ -252,7 +255,7 @@ module ActiveRecord
 
       # === Abstract Adapter (Misc Support) =========================== #
 
-      def initialize_type_map(m)
+      def initialize_type_map(m = type_map)
         m.register_type              %r{.*},            SQLServer::Type::UnicodeString.new
         # Exact Numerics
         register_class_with_limit m, 'bigint(8)',         SQLServer::Type::BigInteger
@@ -434,16 +437,15 @@ module ActiveRecord
       end
 
       def version_year
-        return @version_year if defined?(@version_year)
-        @version_year = begin
-          vstring = _raw_select('SELECT @@version', fetch: :rows).first.first.to_s
-          return 2016 if vstring =~ /vNext/
-          /SQL Server (\d+)/.match(vstring).to_a.last.to_s.to_i
-        rescue Exception => e
-          2016
-        end
+        return 2016 if sqlserver_version =~ /vNext/
+        /SQL Server (\d+)/.match(sqlserver_version).to_a.last.to_s.to_i
+      rescue StandardError => e
+        2016
       end
 
+      def sqlserver_version
+        @sqlserver_version ||= _raw_select('SELECT @@version', fetch: :rows).first.first.to_s
+      end
     end
   end
 end
